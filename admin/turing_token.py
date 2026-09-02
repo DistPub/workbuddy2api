@@ -47,7 +47,7 @@ def get_device_token(force: bool = False) -> str | None:
 
     node = _node_bin()
     if not node or not _HELPER.is_file():
-        return None
+        raise Exception(f'not found node or helper')
 
     env = dict(os.environ)
     # 允许通过环境变量覆盖 SDK 目录 / channelId，未设置则用 helper 内的默认值
@@ -55,23 +55,21 @@ def get_device_token(force: bool = False) -> str | None:
         env.setdefault("WORKBUDDY_TURING_SDK_DIR",
                        r"D:\workbuddy\resources\app.asar.unpacked\native\turing-sdk")
 
-    try:
-        out = subprocess.run(
-            [node, str(_HELPER)],
-            capture_output=True, text=True, timeout=25, env=env,
-        )
-    except Exception:
-        return None
+    out = subprocess.run(
+        [node, str(_HELPER)],
+        capture_output=True, text=True, timeout=25, env=env,
+    )
 
     if out.returncode != 0:
-        return None
+        raise Exception(f'subprocess exit code：{out.returncode} stdout: {out.stdout} stderr: {out.stderr}')
 
     token: str | None = None
     try:
-        data = json.loads(out.stdout)
+        result = out.stdout
+        data = json.loads(result)
         token = (data.get("token") or "").strip() or None
     except Exception:
-        return None
+        raise Exception(f'parse subprocess stdout error: {result}')
 
     if token:
         with _lock:

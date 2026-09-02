@@ -145,7 +145,8 @@ def _get_turing_device_token() -> str | None:
     try:
         from admin.turing_token import get_device_token
         return get_device_token()
-    except Exception:
+    except Exception as error:
+        _log(f'获取device token错误： {error}')
         return None
 
 
@@ -234,6 +235,7 @@ class CredentialManager:
         # 取不到（桌面端未安装 / SDK 不支持）时优雅降级为不带该头，不影响主流程。
         tok = _get_turing_device_token()
         if tok:
+            _log(f'获取到device token：{tok}')
             h["X-Device-Token"] = tok
         return h
 
@@ -1155,7 +1157,6 @@ def main():
                          "但审核误拦风险略高于默认压缩模式。")
     ap.add_argument("--skip-check", action="store_true", help="跳过启动预检")
     args = ap.parse_args()
-
     CONFIG["api_key"] = args.api_key
     CONFIG["desensitize"] = args.desensitize
     CONFIG["no_compact"] = args.no_compact
