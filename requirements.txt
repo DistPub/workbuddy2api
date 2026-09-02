@@ -1,0 +1,12 @@
+fastapi
+uvicorn[standard]
+httpx
+# 管理后台（多账号反代 + API Key 网关）
+sqlalchemy>=2.0
+pymysql
+redis
+python-multipart
+PyJWT
+cryptography
+# 从 .env 读取配置
+python-dotenv

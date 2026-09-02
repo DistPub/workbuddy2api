@@ -1,0 +1,805 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>WorkBuddy 反代管理后台</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@fortawesome/fontawesome-free@6.5.2/css/all.min.css" />
+  <style>
+    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif; }
+    .fade-in { animation: fade .25s ease; }
+    @keyframes fade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; transform: none; } }
+    .toast { position: fixed; right: 18px; bottom: 18px; z-index: 60; }
+    .modal-overlay { background: rgba(0,0,0,.4); }
+    pre { white-space: pre-wrap; word-break: break-all; }
+  </style>
+</head>
+<body class="bg-slate-100 text-slate-800">
+
+<!-- 登录 -->
+<div id="login" class="min-h-screen flex items-center justify-center bg-gradient-to-br from-indigo-600 to-violet-700">
+  <div class="bg-white rounded-2xl shadow-2xl w-full max-w-sm p-8 fade-in">
+    <div class="text-center mb-6">
+      <i class="fa-solid fa-server text-4xl text-indigo-600"></i>
+      <h1 class="text-xl font-bold mt-3">WorkBuddy 反代管理后台</h1>
+      <p class="text-sm text-slate-400 mt-1">多账号轮换 · API Key 网关 · 模型配置</p>
+    </div>
+    <input id="username" class="w-full border rounded-lg px-3 py-2 mb-3 text-sm" placeholder="用户名" value="admin" />
+    <input id="password" type="password" class="w-full border rounded-lg px-3 py-2 mb-4 text-sm" placeholder="密码" value="admin123" />
+    <button onclick="doLogin()" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white rounded-lg py-2 text-sm font-medium">
+      <i class="fa-solid fa-right-to-bracket mr-1"></i> 登录
+    </button>
+    <p id="loginErr" class="text-red-500 text-xs mt-3 text-center hidden"></p>
+  </div>
+</div>
+
+<!-- 主界面 -->
+<div id="app" class="hidden min-h-screen">
+  <!-- 顶栏 -->
+  <header class="bg-white shadow-sm sticky top-0 z-30">
+    <div class="max-w-6xl mx-auto px-4 h-14 flex items-center justify-between">
+      <div class="flex items-center gap-2 font-bold text-indigo-700">
+        <i class="fa-solid fa-server"></i> WorkBuddy 反代后台
+      </div>
+      <div class="flex items-center gap-3 text-sm">
+        <span id="proxyUrl" class="text-slate-400 hidden md:inline"></span>
+        <button onclick="logout()" class="text-slate-500 hover:text-red-500"><i class="fa-solid fa-right-from-bracket"></i> 退出</button>
+      </div>
+    </div>
+  </header>
+
+  <main class="max-w-6xl mx-auto px-4 py-6">
+    <!-- 概览 -->
+    <section id="overview" class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6"></section>
+
+    <!-- Tabs -->
+    <div class="flex gap-1 border-b mb-4 overflow-x-auto">
+      <button class="tab-btn px-4 py-2 text-sm font-medium border-b-2 border-indigo-600 text-indigo-600 whitespace-nowrap" data-tab="accounts"><i class="fa-solid fa-user-group mr-1"></i> 账号</button>
+      <button class="tab-btn px-4 py-2 text-sm font-medium text-slate-500 whitespace-nowrap" data-tab="keys"><i class="fa-solid fa-key mr-1"></i> API Keys</button>
+      <button class="tab-btn px-4 py-2 text-sm font-medium text-slate-500 whitespace-nowrap" data-tab="models"><i class="fa-solid fa-shapes mr-1"></i> 模型配置</button>
+      <button class="tab-btn px-4 py-2 text-sm font-medium text-slate-500 whitespace-nowrap" data-tab="schedules"><i class="fa-solid fa-clock-rotate-left mr-1"></i> 定时任务</button>
+      <button class="tab-btn px-4 py-2 text-sm font-medium text-slate-500 whitespace-nowrap" data-tab="logs"><i class="fa-solid fa-list mr-1"></i> 日志</button>
+      <button class="tab-btn px-4 py-2 text-sm font-medium text-slate-500 whitespace-nowrap" data-tab="sync"><i class="fa-solid fa-cloud-arrow-up mr-1"></i> 同步设置</button>
+    </div>
+
+    <!-- 账号面板 -->
+    <section id="panel-accounts">
+      <div class="flex flex-wrap justify-between items-center mb-3 gap-2">
+        <h2 class="font-semibold">账号池</h2>
+        <div class="flex flex-wrap gap-2">
+          <button onclick="scanLocal()" class="text-sm px-3 py-1.5 rounded-lg border hover:bg-slate-50"><i class="fa-solid fa-magnifying-glass mr-1"></i> 扫描本机账号</button>
+          <button onclick="refreshAll()" class="text-sm px-3 py-1.5 rounded-lg border hover:bg-slate-50"><i class="fa-solid fa-rotate mr-1"></i> 全部刷新余额</button>
+          <button onclick="openUpload()" class="text-sm px-3 py-1.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700"><i class="fa-solid fa-file-import mr-1"></i> 批量上传</button>
+          <button onclick="openAddAccount()" class="text-sm px-3 py-1.5 rounded-lg border hover:bg-slate-50"><i class="fa-solid fa-plus mr-1"></i> 单个添加</button>
+        </div>
+      </div>
+      <div class="bg-white rounded-xl shadow-sm overflow-x-auto max-h-[72vh]">
+        <table class="w-full text-sm">
+          <thead class="bg-slate-50 text-slate-500 text-left">
+            <tr>
+              <th class="px-4 py-3">名称</th><th class="px-4 py-3">UID</th><th class="px-4 py-3">状态</th>
+              <th class="px-4 py-3">总积分</th><th class="px-4 py-3">剩余</th><th class="px-4 py-3">同步</th><th class="px-4 py-3 text-right">操作</th>
+            </tr>
+          </thead>
+          <tbody id="accBody"></tbody>
+        </table>
+      </div>
+      <div id="accPager" class="flex justify-between items-center mt-3 text-sm text-slate-500"></div>
+    </section>
+
+    <!-- Key 面板 -->
+    <section id="panel-keys" class="hidden">
+      <div class="flex justify-between items-center mb-3">
+        <h2 class="font-semibold">API Keys（对外共享）</h2>
+        <button onclick="openAddKey()" class="text-sm px-3 py-1.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700"><i class="fa-solid fa-plus mr-1"></i> 创建 Key</button>
+      </div>
+      <div class="bg-white rounded-xl shadow-sm overflow-x-auto max-h-[72vh]">
+        <table class="w-full text-sm">
+          <thead class="bg-slate-50 text-slate-500 text-left">
+            <tr>
+              <th class="px-4 py-3">名称</th><th class="px-4 py-3">Key</th><th class="px-4 py-3">限额</th>
+              <th class="px-4 py-3">已用</th><th class="px-4 py-3">状态</th><th class="px-4 py-3 text-right">操作</th>
+            </tr>
+          </thead>
+          <tbody id="keyBody"></tbody>
+        </table>
+      </div>
+      <div id="keyPager" class="flex justify-between items-center mt-3 text-sm text-slate-500"></div>
+    </section>
+
+    <!-- 模型配置面板 -->
+    <section id="panel-models" class="hidden">
+      <div class="flex flex-wrap justify-between items-center mb-3 gap-2">
+        <h2 class="font-semibold">模型白名单配置</h2>
+        <div class="flex flex-wrap gap-2">
+          <button onclick="syncModels()" class="text-sm px-3 py-1.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700"><i class="fa-solid fa-cloud-arrow-down mr-1"></i> 从后端同步模型</button>
+          <button onclick="enableAllModels(true)" class="text-sm px-3 py-1.5 rounded-lg border hover:bg-slate-50"><i class="fa-solid fa-check-double mr-1"></i> 全部启用</button>
+          <button onclick="enableAllModels(false)" class="text-sm px-3 py-1.5 rounded-lg border hover:bg-slate-50"><i class="fa-solid fa-ban mr-1"></i> 全部禁用</button>
+        </div>
+      </div>
+      <p class="text-xs text-slate-400 mb-3">提示：未配置任何模型规则时放行全部模型；配置后仅白名单内模型可用，请求不在名单的模型返回「模型不存在」错误。</p>
+      <div class="bg-white rounded-xl shadow-sm overflow-x-auto max-h-[72vh]">
+        <table class="w-full text-sm">
+          <thead class="bg-slate-50 text-slate-500 text-left">
+            <tr>
+              <th class="px-4 py-3">模型 ID</th><th class="px-4 py-3">级别</th><th class="px-4 py-3">倍率</th>
+              <th class="px-4 py-3">备注</th><th class="px-4 py-3">状态</th><th class="px-4 py-3 text-right">操作</th>
+            </tr>
+          </thead>
+          <tbody id="modelBody"></tbody>
+        </table>
+      </div>
+      <div id="modelPager" class="flex justify-between items-center mt-3 text-sm text-slate-500"></div>
+    </section>
+
+    <!-- 定时任务面板 -->
+    <section id="panel-schedules" class="hidden">
+      <div class="flex flex-wrap justify-between items-center mb-3 gap-2">
+        <h2 class="font-semibold">定时任务</h2>
+        <button onclick="openAddSchedule()" class="text-sm px-3 py-1.5 rounded-lg bg-indigo-600 text-white hover:bg-indigo-700"><i class="fa-solid fa-plus mr-1"></i> 新建任务</button>
+      </div>
+      <p class="text-xs text-slate-400 mb-3">定时统计平台总积分、同步模型列表等。调度线程随服务启动运行，到点自动执行并回填结果。</p>
+      <div class="bg-white rounded-xl shadow-sm overflow-hidden">
+        <div class="overflow-x-auto">
+          <table class="w-full text-sm">
+            <thead class="bg-slate-50 text-slate-500 text-left"><tr>
+              <th class="px-4 py-3">任务名</th><th class="px-4 py-3">类型</th><th class="px-4 py-3">间隔(分)</th>
+              <th class="px-4 py-3">下次运行</th><th class="px-4 py-3">上次结果</th><th class="px-4 py-3">状态</th>
+              <th class="px-4 py-3 text-right">操作</th>
+            </tr></thead>
+            <tbody id="scheduleBody"></tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+
+    <!-- 日志面板 -->
+    <section id="panel-logs" class="hidden">
+      <div class="flex flex-wrap justify-between items-center mb-3 gap-2">
+        <h2 class="font-semibold">用量日志</h2>
+        <div class="flex flex-wrap gap-2 items-center">
+          <input id="logStart" type="date" class="border rounded px-2 py-1 text-sm" title="起始日期" />
+          <span class="text-slate-400 text-sm">~</span>
+          <input id="logEnd" type="date" class="border rounded px-2 py-1 text-sm" title="结束日期" />
+          <input id="logModel" placeholder="按模型筛选" class="border rounded px-2 py-1 text-sm" />
+          <button onclick="loadLogs(1)" class="px-3 py-1.5 rounded-lg border text-sm"><i class="fa-solid fa-filter mr-1"></i> 筛选</button>
+          <button onclick="loadLogs(_logPage)" class="px-3 py-1.5 rounded-lg border text-sm" title="刷新"><i class="fa-solid fa-rotate"></i></button>
+        </div>
+      </div>
+      <div class="bg-white rounded-xl shadow-sm overflow-hidden">
+        <div class="overflow-x-auto max-h-[60vh]">
+          <table class="w-full text-sm">
+            <thead class="bg-slate-50 text-slate-500 text-left sticky top-0"><tr>
+              <th class="px-4 py-3">时间</th><th class="px-4 py-3">Key</th><th class="px-4 py-3">账号</th>
+              <th class="px-4 py-3">模型</th><th class="px-4 py-3">积分</th>
+            </tr></thead>
+            <tbody id="logBody"></tbody>
+          </table>
+        </div>
+      </div>
+      <div id="logPager" class="flex justify-between items-center mt-3 text-sm text-slate-500"></div>
+    </section>
+
+    <!-- 同步设置面板 -->
+    <section id="panel-sync" class="hidden">
+      <h2 class="font-semibold mb-3">线上同步设置</h2>
+      <div class="bg-white rounded-xl shadow-sm p-5 max-w-2xl">
+        <p class="text-xs text-slate-400 mb-4">本地数据视为最新。配置线上实例的 URL 与密钥（HMAC 签名），点击「同步到线上」把本地账号与模型配置推送过去。线上实例需配置相同密钥并通过 <code class="text-[11px]">/api/sync/receive</code> 接收。</p>
+        <label class="block text-sm mb-1">远程 URL</label>
+        <input id="syncUrl" class="w-full border rounded-lg px-3 py-2 mb-3 text-sm" placeholder="https://online.example.com" />
+        <label class="block text-sm mb-1">同步密钥（HMAC 签名用）</label>
+        <input id="syncSecret" type="password" class="w-full border rounded-lg px-3 py-2 mb-3 text-sm" placeholder="与线上实例一致的密钥" />
+        <div class="flex gap-2 flex-wrap">
+          <button onclick="saveSyncConfig()" class="px-3 py-1.5 rounded-lg border text-sm hover:bg-slate-50">保存配置</button>
+          <button onclick="pushToOnline()" class="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-sm hover:bg-indigo-700"><i class="fa-solid fa-cloud-arrow-up mr-1"></i> 同步到线上</button>
+        </div>
+        <div id="syncStatus" class="text-sm text-slate-500 mt-4"></div>
+      </div>
+    </section>
+  </main>
+</div>
+
+<!-- 通用模态框 -->
+<div id="modal" class="fixed inset-0 modal-overlay hidden items-center justify-center z-50">
+  <div class="bg-white rounded-2xl shadow-2xl w-full max-w-2xl p-6 fade-in max-h-[85vh] overflow-y-auto" id="modalBox"></div>
+</div>
+
+<div id="toasts" class="toast flex flex-col gap-2"></div>
+
+<script>
+const $ = (s) => document.querySelector(s);
+const TOKEN_KEY = "wb_admin_token";
+let TOKEN = localStorage.getItem(TOKEN_KEY) || "";
+
+function api(path, opts = {}) {
+  opts.headers = Object.assign({ "X-Admin-Token": TOKEN }, opts.headers || {});
+  return fetch(path, opts);
+}
+function toast(msg, type = "ok") {
+  const c = type === "ok" ? "bg-emerald-600" : "bg-red-600";
+  const el = document.createElement("div");
+  el.className = `text-white text-sm px-4 py-2 rounded-lg shadow ${c} fade-in`;
+  el.innerHTML = msg;
+  $("#toasts").appendChild(el);
+  setTimeout(() => el.remove(), 3200);
+}
+function openModal(html) { $("#modalBox").innerHTML = html; $("#modal").classList.remove("hidden"); $("#modal").classList.add("flex"); }
+function closeModal() { $("#modal").classList.add("hidden"); $("#modal").classList.remove("flex"); }
+// 点击弹窗空白区域关闭
+document.addEventListener("DOMContentLoaded", () => {
+  $("#modal")?.addEventListener("click", (e) => { if (e.target === $("#modal")) closeModal(); });
+  // 也支持 ESC 关闭
+  document.addEventListener("keydown", (e) => { if (e.key === "Escape") closeModal(); });
+});
+
+async function doLogin() {
+  const fd = new URLSearchParams({ username: $("#username").value, password: $("#password").value });
+  const r = await fetch("/api/login", { method: "POST", body: fd });
+  if (!r.ok) { $("#loginErr").textContent = "登录失败"; $("#loginErr").classList.remove("hidden"); return; }
+  const d = await r.json();
+  TOKEN = d.token; localStorage.setItem(TOKEN_KEY, TOKEN);
+  enterApp();
+}
+function logout() { localStorage.removeItem(TOKEN_KEY); location.reload(); }
+function enterApp() {
+  $("#login").classList.add("hidden"); $("#app").classList.remove("hidden");
+  $("#proxyUrl").textContent = location.origin + "/v1";
+  loadAccounts(); loadKeys(); loadModels(); loadSchedules(); loadLogs(); loadSyncConfig();
+}
+
+// Tabs
+document.querySelectorAll(".tab-btn").forEach(b => b.onclick = () => {
+  document.querySelectorAll(".tab-btn").forEach(x => { x.classList.remove("border-indigo-600","text-indigo-600"); x.classList.add("text-slate-500"); });
+  b.classList.add("border-indigo-600","text-indigo-600"); b.classList.remove("text-slate-500");
+  ["accounts","keys","models","schedules","logs","sync"].forEach(t => {
+    $(`#panel-${t}`).classList.toggle("hidden", b.dataset.tab !== t);
+  });
+});
+
+/* ==================== 账号 ==================== */
+function accRow(a) {
+  return `
+    <tr class="border-t">
+      <td class="px-4 py-3">${esc(a.name || "未命名")}</td>
+      <td class="px-4 py-3 text-slate-500">${esc(a.uid || "-")}</td>
+      <td class="px-4 py-3">${badge(a.status)}</td>
+      <td class="px-4 py-3">${a.balance_total}</td>
+      <td class="px-4 py-3 font-medium ${a.balance_remain>0?'text-emerald-600':'text-red-500'}">${a.balance_remain}</td>
+      <td class="px-4 py-3 text-slate-400 text-xs whitespace-nowrap">${a.last_sync_at ? a.last_sync_at.slice(0,19).replace("T"," ") : "-"}</td>
+      <td class="px-4 py-3 text-right whitespace-nowrap">
+        <button onclick="viewCreditDetails(${a.id},'${esc(a.name||'')}')" class="text-amber-600 hover:text-amber-800 mr-1" title="查看积分明细"><i class="fa-solid fa-list-ul"></i></button>
+        <button onclick="viewRequestUsage(${a.id},'${esc(a.name||'')}')" class="text-blue-600 hover:text-blue-800 mr-1" title="请求用量"><i class="fa-solid fa-chart-line"></i></button>
+        <button onclick="injectAcc(${a.id})" class="text-violet-600 hover:text-violet-800 mr-1" title="注入到本机客户端"><i class="fa-solid fa-right-to-bracket"></i></button>
+        <button onclick="refreshAcc(${a.id})" class="text-indigo-600 hover:text-indigo-800 mr-1" title="刷新余额"><i class="fa-solid fa-rotate"></i></button>
+        <button onclick="toggleAcc(${a.id},'${a.status==='active'?'disabled':'active'}')" class="text-slate-500 hover:text-slate-800 mr-1" title="启用/禁用"><i class="fa-solid fa-power-off"></i></button>
+        <button onclick="delAcc(${a.id})" class="text-red-500 hover:text-red-700" title="删除"><i class="fa-solid fa-trash"></i></button>
+      </td>
+    </tr>`;
+}
+async function loadAccounts() {
+  const r = await api("/api/accounts"); if (!r.ok) return;
+  const d = await r.json();
+  const s = d.summary;
+  $("#overview").innerHTML = `
+    ${card("账号总数", s.total, "fa-users", "text-indigo-600")}
+    ${card("可用账号", s.available, "fa-circle-check", "text-emerald-600")}
+    ${card("总积分", s.balance_total, "fa-coins", "text-amber-600")}
+    ${card("总剩余", s.balance_remain, "fa-wallet", "text-rose-600")}`;
+  _accData = d.items || [];
+  renderAccPage(1);
+}
+function renderAccPage(p) {
+  const total = _accData.length, totalPages = Math.max(1, Math.ceil(total / PS));
+  p = Math.min(Math.max(1, p), totalPages);
+  const slice = _accData.slice((p - 1) * PS, p * PS);
+  $("#accBody").innerHTML = slice.map(accRow).join("") ||
+    `<tr><td colspan="7" class="px-4 py-8 text-center text-slate-400">还没有账号，点「批量上传」</td></tr>`;
+  $("#accPager").innerHTML = pagerHtml(total, p, totalPages, "renderAccPage");
+}
+function card(t, v, ic, col) {
+  return `<div class="bg-white rounded-xl shadow-sm p-4"><div class="text-slate-400 text-xs">${t}</div>
+    <div class="mt-1 flex items-center gap-2"><i class="fa-solid ${ic} ${col}"></i><span class="text-2xl font-bold">${v}</span></div></div>`;
+}
+function badge(st) {
+  const m = st === "active" ? ["bg-emerald-100 text-emerald-700","正常"] : ["bg-slate-100 text-slate-500","禁用"];
+  return `<span class="px-2 py-0.5 rounded-full text-xs ${m[0]}">${m[1]}</span>`;
+}
+function esc(s){ return (s||"").replace(/[&<>"]/g, c => ({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;"}[c])); }
+
+/* 列表分页（移动端友好） */
+const PS = 10;
+let _accData = [], _keyData = [], _modelData = [];
+function pagerHtml(total, page, totalPages, fn) {
+  if (totalPages <= 1) return `<span class="text-slate-400">共 ${total} 条</span>`;
+  return `<span>共 ${total} 条 · 第 ${page}/${totalPages} 页</span>
+    <span class="flex gap-1">
+      <button class="px-2 py-1 rounded border text-xs ${page<=1?'opacity-40 pointer-events-none':''} hover:bg-slate-50" onclick="${fn}(${page-1})"><i class="fa-solid fa-chevron-left"></i></button>
+      <button class="px-2 py-1 rounded border text-xs ${page>=totalPages?'opacity-40 pointer-events-none':''} hover:bg-slate-50" onclick="${fn}(${page+1})"><i class="fa-solid fa-chevron-right"></i></button>
+    </span>`;
+}
+
+async function refreshAcc(id){ const r=await api("/api/accounts/"+id+"/refresh",{method:"POST"}); toast(r.ok?"余额已刷新":"刷新失败", r.ok?"ok":"err"); if(r.ok) loadAccounts(); }
+async function toggleAcc(id,st){ await api("/api/accounts/"+id,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({status:st})}); loadAccounts(); }
+async function delAcc(id){ if(!confirm("确认删除该账号？"))return; const r=await api("/api/accounts/"+id,{method:"DELETE"}); toast(r.ok?"已删除":"删除失败",r.ok?"ok":"err"); if(r.ok) loadAccounts(); }
+async function injectAcc(id){
+  if(!confirm("确认把该账号注入到本机 WorkBuddy 客户端？\n会先自动备份当前活动登录态（*.bak-时间戳）。")) return;
+  const r = await api("/api/accounts/"+id+"/inject",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({confirm:true})});
+  const d = await r.json().catch(()=>({}));
+  if(r.ok){ toast(`已注入到本机客户端（备份: ${d.backup?d.backup.split(/[\\/]/).pop():"无"}）`); }
+  else { toast("注入失败: "+(d.detail||""), "err"); }
+}
+
+/* 积分明细（需求1） — 修复到期时间显示 */
+async function viewCreditDetails(id, name){
+  openModal(`<h3 class="font-bold mb-1"><i class="fa-solid fa-list-ul mr-1"></i> 积分明细 — ${esc(name)}</h3><p class="text-xs text-slate-400 mb-3">加载中...</p><div id="creditDetailBody"></div>
+    <div class="flex justify-end mt-4"><button onclick="closeModal()" class="px-3 py-1.5 rounded-lg border text-sm">关闭</button></div>`);
+  try {
+    const r = await api("/api/accounts/"+id+"/credit-details");
+    const d = await r.json();
+    if(!r.ok){ $("#creditDetailBody").innerHTML = `<p class="text-red-500 text-sm">获取失败: ${esc(d.detail||"未知错误")}</p>`; return; }
+    const pkgs = d.packages || [];
+    let totalRemain = 0, totalSize = 0, totalUsed = 0;
+    for(const p of pkgs){ totalRemain += p.remain||0; totalSize += p.total||0; totalUsed += p.used||0; }
+    $("#creditDetailBody").innerHTML = `
+      <div class="mb-3 p-3 bg-slate-50 rounded-lg flex flex-wrap gap-6 text-sm">
+        <div><span class="text-slate-400">合计总量:</span> <strong>${totalSize}</strong></div>
+        <div><span class="text-slate-400">合计剩余:</span> <strong class="${totalRemain>0?'text-emerald-600':'text-red-500'}">${totalRemain}</strong></div>
+        <div><span class="text-slate-400">已用:</span> <strong class="text-slate-600">${totalUsed}</strong></div>
+        <div><span class="text-slate-400">包数:</span> <strong>${pkgs.length}</strong></div>
+      </div>
+      <div class="rounded-lg border overflow-hidden">
+        <table class="w-full text-sm"><thead class="bg-slate-50 text-slate-500 text-left sticky top-0"><tr>
+          <th class="px-3 py-2">包名称</th><th class="px-3 py-2">总量</th><th class="px-3 py-2">剩余</th><th class="px-3 py-2">已用</th>
+          <th class="px-3 py-2">周期开始</th><th class="px-3 py-2">周期结束(到期)</th><th class="px-3 py-2">绝对到期</th><th class="px-3 py-2">进度</th>
+        </tr></thead><tbody>${
+          pkgs.length ? pkgs.map(p => {
+            const pct = p.total > 0 ? ((p.remain/p.total)*100).toFixed(0) : 0;
+            // 判断是否过期：优先看 deduction_end（绝对到期），其次看 cycle_end
+            const isExpired = p.deduction_end ? (new Date(p.deduction_end) < new Date()) :
+                               (p.cycle_end ? (new Date(p.cycle_end) < new Date()) : false);
+            return `<tr class="border-t"><td class="px-3 py-2 max-w-[220px] truncate" title="${esc(p.name)}">${esc(p.name)}</td>
+              <td class="px-3 py-2">${p.total}</td>
+              <td class="px-3 py-2 ${p.remain>0?'text-emerald-600':'text-slate-400'}">${p.remain}${isExpired?' <span class="text-[10px] text-red-500 font-bold">已过期</span>':''}</td>
+              <td class="px-3 py-2 text-slate-500">${p.used||0}</td>
+              <td class="px-3 py-2 text-xs text-slate-400 whitespace-nowrap">${p.cycle_start || '-'}</td>
+              <td class="px-3 py-2 text-xs whitespace-nowrap ${isExpired&&!p.deduction_end?'text-red-500':''}">${p.cycle_end || '-'}</td>
+              <td class="px-3 py-2 text-xs whitespace-nowrap ${isExpired&&p.deduction_end?'text-red-500':''}">${p.deduction_end || (p.deduction_end_ts?'永不过期':'-')}</td>
+              <td class="px-3 py-2"><div class="w-24 h-2 bg-slate-200 rounded-full overflow-hidden"><div class="h-full ${p.remain>0?(isExpired?'bg-amber-500':'bg-emerald-500'):'bg-red-400'}" style="width:${pct}%"></div></div> <span class="text-[10px] text-slate-400">${pct}%</span></td></tr>`;
+          }).join('') : '<tr><td colspan="8" class="px-3 py-6 text-center text-slate-400">无积分包数据</td></tr>'
+        }</tbody></table>
+      </div>`;
+  } catch(e) { $("#creditDetailBody").innerHTML = `<p class="text-red-500 text-sm">请求异常: ${esc(e.message)}</p>`; }
+}
+
+/* 请求用量（需求4 — 对接 WorkBuddy API，显示全部字段） */
+async function viewRequestUsage(id, name){
+  const now = new Date();
+  const today = now.toISOString().slice(0,10);
+  openModal(`
+    <h3 class="font-bold mb-1"><i class="fa-solid fa-chart-line mr-1"></i> 请求用量 — ${esc(name)}</h3>
+    <div class="flex gap-2 mb-3 flex-wrap">
+      <input id="ruStart" type="date" class="border rounded px-2 py-1 text-sm" value="${today}" />
+      <input id="ruEnd" type="date" class="border rounded px-2 py-1 text-sm" value="${today}" />
+      <button onclick="doLoadRequestUsage(${id})" class="px-3 py-1 bg-indigo-600 text-white rounded text-sm">查询</button>
+    </div>
+    <div id="ruBody" class="text-sm text-slate-400">点击「查询」加载用量数据（来自 WorkBuddy 后端 API）</div>
+    <div class="flex justify-end mt-4"><button onclick="closeModal()" class="px-3 py-1.5 rounded-lg border text-sm">关闭</button></div>`);
+}
+// 字段中文映射
+const _RU_FIELD_MAP = {
+  requestId: "请求ID", credit: "积分消耗", model: "模型",
+  client: "客户端", requestTime: "请求时间",
+  inputTrunc: "输入(截断)", input: "输入(完整)", agentPurpose: "用途",
+};
+async function doLoadRequestUsage(id){
+  const start = ($("#ruStart").value || "") + " 00:00:00";
+  const end = ($("#ruEnd").value || "") + " 23:59:59";
+  $("#ruBody").innerHTML = "查询中...";
+  try {
+    const r = await api(`/api/accounts/${id}/request-usage?start_time=${encodeURIComponent(start)}&end_time=${encodeURIComponent(end)}`);
+    const d = await r.json();
+    if(!r.ok){ $("#ruBody").innerHTML = `<p class="text-red-500">查询失败: ${esc(d.detail||"")}</p>`; return; }
+    // 实际返回结构：{ code, msg, requestId, data: { total, data: [...] } }
+    const wrapper = d.data || {};
+    const items = wrapper.data || wrapper.list || wrapper.records || [];
+    const arr = Array.isArray(items) ? items : (items ? [items] : []);
+    const total = wrapper.total || arr.length;
+    if(!arr.length){ $("#ruBody").innerHTML = `<p class="text-slate-400">该时间段无请求数据</p>`; return; }
+
+    // 动态收集所有字段
+    const allKeys = new Set();
+    for(const it of arr){ for(const k of Object.keys(it)) allKeys.add(k); }
+    // 排序：优先显示关键字
+    const keyOrder = ["requestTime","model","credit","client","agentPurpose","inputTrunc","input","requestId"];
+    const sortedKeys = [...allKeys].sort((a,b) => {
+      const ia = keyOrder.indexOf(a), ib = keyOrder.indexOf(b);
+      if(ia>=0 && ib>=0) return ia-ib;
+      if(ia>=0) return -1; if(ib>=0) return 1;
+      return a.localeCompare(b);
+    });
+
+    // 截断长文本的工具函数
+    const trunc = (s, len=80) => !s ? '' : (String(s).length > len ? String(s).slice(0,len)+'...' : s);
+
+    $("#ruBody").innerHTML = `
+      <div class="mb-2 text-xs text-slate-500">共 ${total} 条记录</div>
+      <div class="rounded-lg border overflow-y-auto max-h-[50vh]">
+        <table class="w-full text-xs"><thead class="bg-slate-50 text-slate-500 sticky top-0"><tr>${
+          sortedKeys.map(k => `<th class="px-2 py-1.5 text-left whitespace-nowrap">${_RU_FIELD_MAP[k]||k}</th>`).join('')
+        }</tr></thead><tbody>${arr.map(it => `<tr class="border-t hover:bg-slate-50">${
+          sortedKeys.map(k => {
+            let v = it[k];
+            const isCredit = k === 'credit';
+            // 积分消耗着色
+            if(isCredit && typeof v === 'number') return `<td class="px-2 py-1 ${v>0?'text-amber-600 font-medium':'text-slate-400'}">${v}</td>`;
+            // 长文本截断+title
+            const sv = String(v ?? '');
+            if(sv.length > 60) return `<td class="px-2 py-1 max-w-[260px]" title="${esc(sv)}">${esc(trunc(sv))}</td>`;
+            return `<td class="px-2 py-1 whitespace-nowrap">${esc(sv||'-')}</td>`;
+          }).join('')
+        }</tr>`).join('')}</tbody></table>
+      </div>`;
+  } catch(e){ $("#ruBody").innerHTML = `<p class="text-red-500">异常: ${esc(e.message)}</p>`; }
+}
+
+/* 扫描本机账号（需求2 — 已去重 + 显示 token 到期时间） */
+async function scanLocal(){
+  const r = await api("/api/accounts/scan-local"); const d = await r.json().catch(()=>({}));
+  if(!r.ok){ toast("扫描失败","err"); return; }
+  if(!d.exists){ openModal(`<h3 class="font-bold mb-3">扫描本机账号</h3><p class="text-sm text-slate-500">未找到登录目录：<br><code class="text-xs">${esc(d.dir||"")}</code></p><div class="flex justify-end mt-4"><button onclick="closeModal()" class="px-3 py-1.5 rounded-lg border text-sm">关闭</button></div>`); return; }
+  const rows = (d.items||[]).map(it => `
+    <tr class="border-t">
+      <td class="px-3 py-2">${esc(it.nickname||"-")} ${it.is_active?'<span class="ml-1 px-1.5 py-0.5 rounded text-[10px] bg-emerald-100 text-emerald-700">当前</span>':''}</td>
+      <td class="px-3 py-2 font-mono text-xs text-slate-500">${esc(it.uid||"-")}</td>
+      <td class="px-3 py-2 text-slate-400 text-xs">${esc(it.domain||"-")}</td>
+      <td class="px-3 py-2 text-slate-400 text-xs max-w-[200px] truncate" title="${esc(it.file)}">${esc(it.file)}</td>
+      <td class="px-3 py-2 text-xs ${it.expires_ts && it.expires_ts < Date.now() ? 'text-red-500' : 'text-slate-500'}">${it.expires_at || '-'}</td>
+      <td class="px-3 py-2 text-right"><button onclick="importOne('${encodeURIComponent(it.file)}')" class="text-indigo-600 hover:text-indigo-800 text-sm"><i class="fa-solid fa-download mr-1"></i>导入号池</button></td>
+    </tr>`).join("") || `<tr><td colspan="6" class="px-3 py-6 text-center text-slate-400">未发现 .info</td></tr>`;
+  openModal(`
+    <h3 class="font-bold mb-1"><i class="fa-solid fa-magnifying-glass mr-1"></i> 扫描本机账号</h3>
+    <p class="text-xs text-slate-500 mb-2">目录：<code>${esc(d.dir)}</code>${d.active_uid?` · 当前活动 UID：${esc(d.active_uid)}`:''} · 已按 UID 去重</p>
+    <div class="bg-white rounded-xl overflow-hidden border max-h-72 overflow-y-auto">
+      <table class="w-full text-sm"><thead class="bg-slate-50 text-slate-500 text-left"><tr>
+        <th class="px-3 py-2">昵称</th><th class="px-3 py-2">UID</th><th class="px-3 py-2">域名</th><th class="px-3 py-2">文件</th><th class="px-3 py-2">Token到期</th><th class="px-3 py-2 text-right">操作</th>
+      </tr></thead><tbody>${rows}</tbody></table>
+    </div>
+    <div class="flex justify-between items-center mt-4">
+      <span class="text-xs text-slate-400">导入后自动用真实昵称命名，并刷新余额</span>
+      <div class="flex gap-2">
+        <button onclick="closeModal()" class="px-3 py-1.5 rounded-lg border text-sm">关闭</button>
+        <button onclick="importAll()" class="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-sm">全部导入号池</button>
+      </div>
+    </div>`);
+}
+async function importOne(file){
+  const r = await api("/api/accounts/import-local",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({files:[decodeURIComponent(file)]})});
+  const d = await r.json().catch(()=>({}));
+  if(r.ok){ toast(`已导入 ${d.added||0} 个`); closeModal(); loadAccounts(); }
+  else toast("导入失败","err");
+}
+async function importAll(){
+  const r = await api("/api/accounts/import-local",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({all:true})});
+  const d = await r.json().catch(()=>({}));
+  if(r.ok){ toast(`已导入 ${d.added||0} 个${d.errors&&d.errors.length?`（${d.errors.length} 个失败）`:''}`); closeModal(); loadAccounts(); }
+  else toast("导入失败","err");
+  if(d.errors) console.warn(d.errors);
+}
+async function refreshAll(){
+  const r=await api("/api/accounts"); if(!r.ok)return; const ids=(await r.json()).items.map(x=>x.id);
+  for(const id of ids){ await api("/api/accounts/"+id+"/refresh",{method:"POST"}); }
+  toast("全部刷新完成"); loadAccounts();
+}
+
+/* 批量上传 */
+function openUpload(){
+  openModal(`
+    <h3 class="font-bold mb-3"><i class="fa-solid fa-file-import mr-1"></i> 批量上传账号</h3>
+    <p class="text-xs text-slate-500 mb-2">粘贴多个 WorkBuddy 登录态（.info 原文）。支持：①一个 JSON 数组；②每行一个 JSON 对象。也可选择本地 .info 文件。</p>
+    <textarea id="upText" class="w-full border rounded-lg p-2 text-xs h-40 font-mono" placeholder='{"auth":{...},"account":{...}}'></textarea>
+    <input id="upFile" type="file" accept=".info,.json" multiple class="mt-2 text-sm" />
+    <div class="flex justify-end gap-2 mt-4">
+      <button onclick="closeModal()" class="px-3 py-1.5 rounded-lg border text-sm">取消</button>
+      <button onclick="submitUpload()" class="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-sm">上传</button>
+    </div>`);
+}
+async function submitUpload(){
+  let text = $("#upText").value.trim();
+  const file = $("#upFile").files;
+  if(file.length){ for(const f of file){ text += "\n" + await f.text(); } }
+  if(!text){ toast("内容为空","err"); return; }
+  let items = [];
+  try { const j = JSON.parse(text); items = Array.isArray(j)?j:[j]; }
+  catch { for(const line of text.split("\n")){ const t=line.trim(); if(!t) continue; try{ items.push(JSON.parse(t)); }catch(e){} } }
+  const body = { items: items.map(x => ({ name: x.account?.nickname || x.name || "", auth_json: JSON.stringify(x) })) };
+  const r = await api("/api/accounts/batch",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+  const d = await r.json().catch(()=>({}));
+  closeModal(); toast(r.ok?`已添加 ${d.added||0} 个账号`:"上传失败", r.ok?"ok":"err");
+  if(d.errors && d.errors.length) console.warn(d.errors);
+  loadAccounts();
+}
+function openAddAccount(){
+  openModal(`
+    <h3 class="font-bold mb-3"><i class="fa-solid fa-plus mr-1"></i> 添加单个账号</h3>
+    <input id="accName" class="w-full border rounded-lg px-3 py-2 mb-2 text-sm" placeholder="名称（可选）" />
+    <textarea id="accJson" class="w-full border rounded-lg p-2 text-xs h-40 font-mono" placeholder='粘贴单个 .info JSON'></textarea>
+    <div class="flex justify-end gap-2 mt-4">
+      <button onclick="closeModal()" class="px-3 py-1.5 rounded-lg border text-sm">取消</button>
+      <button onclick="submitAddAccount()" class="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-sm">添加</button>
+    </div>`);
+}
+async function submitAddAccount(){
+  const auth_json = $("#accJson").value.trim();
+  if(!auth_json){ toast("请粘贴 JSON","err"); return; }
+  const r = await api("/api/accounts",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({name:$("#accName").value||"",auth_json})});
+  closeModal(); toast(r.ok?"已添加":"添加失败", r.ok?"ok":"err"); if(r.ok) loadAccounts();
+}
+
+/* ==================== Keys ==================== */
+function keyRow(k) {
+  return `
+    <tr class="border-t">
+      <td class="px-4 py-3">${esc(k.name||"未命名")}</td>
+      <td class="px-4 py-3 font-mono text-xs text-slate-500">${esc(k.masked)}</td>
+      <td class="px-4 py-3">${k.unlimited?"∞":k.credit_limit}</td>
+      <td class="px-4 py-3 ${k.credit_used>=k.credit_limit&&!k.unlimited?'text-red-500':''}">${k.credit_used}</td>
+      <td class="px-4 py-3">${k.status==="active"?'<span class="px-2 py-0.5 rounded-full text-xs bg-emerald-100 text-emerald-700">正常</span>':'<span class="px-2 py-0.5 rounded-full text-xs bg-slate-100 text-slate-500">已吊销</span>'}</td>
+      <td class="px-4 py-3 text-right whitespace-nowrap">
+        <button onclick="viewKeyUsage(${k.id},'${esc(k.name||'')}')" class="text-blue-600 hover:text-blue-800 mr-1" title="查看用量"><i class="fa-solid fa-chart-pie"></i></button>
+        <button onclick="viewKeyFull(${k.id},'${esc(k.name||'')}')" class="text-violet-600 hover:text-violet-800 mr-1" title="查看完整Key"><i class="fa-solid fa-eye"></i></button>
+        <button onclick="editKey(${k.id},${k.credit_limit},'${k.status}')" class="text-indigo-600 hover:text-indigo-800 mr-2" title="调整"><i class="fa-solid fa-sliders"></i></button>
+        <button onclick="revokeKey(${k.id})" class="text-red-500 hover:text-red-700" title="吊销"><i class="fa-solid fa-ban"></i></button>
+      </td>
+    </tr>`;
+}
+async function loadKeys(){
+  const r = await api("/api/keys"); if(!r.ok) return; const d = await r.json();
+  _keyData = d.items || [];
+  renderKeyPage(1);
+}
+function renderKeyPage(p){
+  const total = _keyData.length, totalPages = Math.max(1, Math.ceil(total / PS));
+  p = Math.min(Math.max(1, p), totalPages);
+  const slice = _keyData.slice((p-1)*PS, p*PS);
+  $("#keyBody").innerHTML = slice.map(keyRow).join("") ||
+    `<tr><td colspan="6" class="px-4 py-8 text-center text-slate-400">还没有 Key，点「创建 Key」</td></tr>`;
+  $("#keyPager").innerHTML = pagerHtml(total, p, totalPages, "renderKeyPage");
+}
+function openAddKey(){
+  openModal(`
+    <h3 class="font-bold mb-3"><i class="fa-solid fa-key mr-1"></i> 创建 API Key</h3>
+    <input id="kName" class="w-full border rounded-lg px-3 py-2 mb-2 text-sm" placeholder="名称（可选）" />
+    <label class="flex items-center gap-2 text-sm mb-2"><input id="kUnlimited" type="checkbox" /> 不限额（∞）</label>
+    <input id="kLimit" type="number" min="0" class="w-full border rounded-lg px-3 py-2 mb-2 text-sm" placeholder="积分限额（credits）" />
+    <input id="kNote" class="w-full border rounded-lg px-3 py-2 mb-2 text-sm" placeholder="备注（可选）" />
+    <div class="flex justify-end gap-2 mt-2">
+      <button onclick="closeModal()" class="px-3 py-1.5 rounded-lg border text-sm">取消</button>
+      <button onclick="submitAddKey()" class="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-sm">创建</button>
+    </div>`);
+}
+async function submitAddKey(){
+  const unlimited = $("#kUnlimited").checked;
+  const body = { name:$("#kName").value||"", unlimited, credit_limit: Number($("#kLimit").value||0), note:$("#kNote").value||"" };
+  const r = await api("/api/keys",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+  const d = await r.json().catch(()=>({}));
+  if(r.ok){
+    openModal(`<h3 class="font-bold mb-3 text-emerald-600"><i class="fa-solid fa-check mr-1"></i> Key 已创建</h3>
+      <p class="text-xs text-slate-500 mb-2">可随时在列表中点击「眼睛」图标再次查看：</p>
+      <div class="flex gap-2"><input id="newKey" readonly class="w-full border rounded-lg px-2 py-2 text-xs font-mono" value="${esc(d.key)}"><button onclick="copyText('#newKey')" class="px-3 bg-indigo-600 text-white rounded-lg text-sm">复制</button></div>
+      <div class="flex justify-end mt-4"><button onclick="closeModal();loadKeys()" class="px-3 py-1.5 rounded-lg border text-sm">完成</button></div>`);
+  } else { toast("创建失败","err"); }
+}
+function copyText(sel){ const i=$(sel); i.select(); navigator.clipboard?.writeText(i.value)||document.execCommand("copy"); toast("已复制"); }
+
+/* 需求3：Key 创建后可再次查看 */
+async function viewKeyFull(id, name){
+  openModal(`<h3 class="font-bold mb-1"><i class="fa-solid fa-eye mr-1"></i> 查看 Key — ${esc(name)}</h3><p class="text-xs text-slate-400 mb-3">加载中...</p><div id="keyFullBody"></div>
+    <div class="flex justify-end mt-4"><button onclick="closeModal()" class="px-3 py-1.5 rounded-lg border text-sm">关闭</button></div>`);
+  try{
+    const r = await api("/api/keys/"+id+"/view");
+    const d = await r.json();
+    if(!r.ok){ $("#keyFullBody").innerHTML=`<p class="text-red-500 text-sm">读取失败: ${esc(d.detail||"")}</p>`; return; }
+    $("#keyFullBody").innerHTML = `
+      <div class="mb-2 text-xs text-slate-400">创建于 ${d.created_at?new Date(d.created_at).toLocaleString():'未知'}</div>
+      <div class="flex gap-2"><input readonly id="fullKeyValue" class="w-full border rounded-lg px-3 py-2 text-sm font-mono bg-slate-50" value="${esc(d.key)}"><button onclick="copyText('#fullKeyValue')" class="px-3 bg-indigo-600 text-white rounded-lg text-sm shrink-0">复制</button></div>`;
+  } catch(e){ $("#keyFullBody").innerHTML=`<p class="text-red-500 text-sm">异常: ${esc(e.message)}</p>`; }
+}
+
+/* 需求5：Key 用量查看 */
+async function viewKeyUsage(id, name){
+  openModal(`<h3 class="font-bold mb-1"><i class="fa-solid fa-chart-pie mr-1"></i> Key 用量 — ${esc(name)}</h3><p class="text-xs text-slate-400 mb-3">加载中...</p><div id="keyUsageBody"></div>
+    <div class="flex justify-end mt-4"><button onclick="closeModal()" class="px-3 py-1.5 rounded-lg border text-sm">关闭</button></div>`);
+  try{
+    const r = await api("/api/keys/"+id+"/usage");
+    const d = await r.json();
+    if(!r.ok){ $("#keyUsageBody").innerHTML=`<p class="text-red-500 text-sm">读取失败: ${esc(d.detail||"")}</p>`; return; }
+    const pct = d.usage_percent ?? null;
+    const barColor = d.unlimited ? 'bg-emerald-500' : (pct >= 90 ? 'bg-red-500' : pct >= 60 ? 'bg-amber-500' : 'bg-emerald-500');
+    $("#keyUsageBody").innerHTML = `
+      <div class="grid grid-cols-2 gap-3 mb-4">
+        <div class="p-3 bg-slate-50 rounded-lg"><div class="text-xs text-slate-400">限额</div><div class="text-lg font-bold">${d.unlimited?'∞（无限制）':d.credit_limit}</div></div>
+        <div class="p-3 bg-slate-50 rounded-lg"><div class="text-xs text-slate-400">已用</div><div class="text-lg font-bold">${d.credit_used}</div></div>
+        <div class="p-3 bg-slate-50 rounded-lg"><div class="text-xs text-slate-400">剩余</div><div class="text-lg font-bold ${d.unlimited?'text-emerald-600':Number(d.credit_remaining)<=0?'text-red-500':'text-emerald-600'}">${d.unlimited?'∞':d.credit_remaining}</div></div>
+        <div class="p-3 bg-slate-50 rounded-lg"><div class="text-xs text-slate-400">使用率</div><div class="text-lg font-bold">${pct!==null?pct+'%':'N/A'}</div></div>
+      </div>
+      ${!d.unlimited ? `<div class="mb-2"><div class="w-full h-3 bg-slate-200 rounded-full overflow-hidden"><div class="h-full ${barColor} transition-all" style="width:${Math.min(pct||0,100)}%"></div></div></div>` : ''}
+      <div class="text-xs text-slate-400">状态: ${d.status==='active'?'<span class="text-emerald-600">正常</span>':'<span class="text-red-500">已吊销</span>'} · 创建: ${d.created_at?new Date(d.created_at).toLocaleString():'未知'}</div>`;
+  } catch(e){ $("#keyUsageBody").innerHTML=`<p class="text-red-500 text-sm">异常: ${esc(e.message)}</p>`; }
+}
+async function editKey(id,limit,status){
+  openModal(`<h3 class="font-bold mb-3">调整 Key #${id}</h3>
+    <input id="ekLimit" type="number" min="0" class="w-full border rounded-lg px-3 py-2 mb-2 text-sm" value="${limit}" placeholder="积分限额" />
+    <label class="flex items-center gap-2 text-sm mb-2"><input id="ekReset" type="checkbox" /> 重置已用额度</label>
+    <div class="flex justify-end gap-2 mt-2"><button onclick="closeModal()" class="px-3 py-1.5 rounded-lg border text-sm">取消</button>
+    <button onclick="submitEditKey(${id})" class="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-sm">保存</button></div>`);
+}
+async function submitEditKey(id){
+  const body = { credit_limit: Number($("#ekLimit").value||0), reset_used: $("#ekReset").checked };
+  const r = await api("/api/keys/"+id,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+  closeModal(); toast(r.ok?"已保存":"保存失败", r.ok?"ok":"err"); if(r.ok) loadKeys();
+}
+async function revokeKey(id){ if(!confirm("确认吊销该 Key？"))return; const r=await api("/api/keys/"+id,{method:"DELETE"}); toast(r.ok?"已吊销":"失败",r.ok?"ok":"err"); if(r.ok) loadKeys(); }
+
+/* ==================== 模型配置（需求6 — 含倍率/FREE标记） ==================== */
+function modelRow(m) {
+  const isFree = m.is_free || (m.credit_multiplier||0) === 0;
+  const mult = m.credit_multiplier || 0;
+  const multDisplay = isFree ? '<span class="px-1.5 py-0.5 rounded text-[10px] font-bold bg-emerald-100 text-emerald-700">FREE</span>'
+    : `<span class="text-amber-600 font-medium">×${mult.toFixed(2)}</span>`;
+  return `
+    <tr class="border-t">
+      <td class="px-4 py-3 font-mono text-xs">${esc(m.model_id)}</td>
+      <td class="px-4 py-3">${m.level==='system'?'<span class="px-2 py-0.5 rounded text-[10px] bg-blue-100 text-blue-700">系统</span>':'<span class="px-2 py-0.5 rounded text-[10px] bg-purple-100 text-purple-700">用户</span>'}</td>
+      <td class="px-4 py-3">${multDisplay}</td>
+      <td class="px-4 py-3 text-slate-400 text-xs">${esc(m.note||'-')}</td>
+      <td class="px-4 py-3">${m.enabled?'<span class="px-2 py-0.5 rounded-full text-xs bg-emerald-100 text-emerald-700">启用</span>':'<span class="px-2 py-0.5 rounded-full text-xs bg-slate-100 text-slate-500">禁用</span>'}</td>
+      <td class="px-4 py-3 text-right whitespace-nowrap">
+        <button onclick="toggleModel(${m.id},${!m.enabled})" class="${m.enabled?'text-amber-600 hover:text-amber-800':'text-emerald-600 hover:text-emerald-800'} text-sm mr-2" title="${m.enabled?'禁用':'启用'}"><i class="fa-solid ${m.enabled?'fa-ban':'fa-check'}"></i></button>
+        <button onclick="deleteModelConfig(${m.id})" class="text-red-500 hover:text-red-700" title="移除"><i class="fa-solid fa-trash"></i></button>
+      </td>
+    </tr>`;
+}
+async function loadModels(){
+  const r = await api("/api/models/configs"); if(!r.ok) return;
+  const d = await r.json();
+  _modelData = d.items || [];
+  renderModelPage(1);
+}
+function renderModelPage(p){
+  const total = _modelData.length, totalPages = Math.max(1, Math.ceil(total / PS));
+  p = Math.min(Math.max(1, p), totalPages);
+  const slice = _modelData.slice((p-1)*PS, p*PS);
+  $("#modelBody").innerHTML = slice.map(modelRow).join("") ||
+    `<tr><td colspan="6" class="px-4 py-8 text-center text-slate-400">还没有模型配置，点击「从后端同步模型」拉取可用模型列表</td></tr>`;
+  $("#modelPager").innerHTML = pagerHtml(total, p, totalPages, "renderModelPage");
+}
+async function syncModels(){
+  toast("正在从后端同步模型列表...","ok");
+  try{
+    const r = await api("/api/models/sync",{method:"POST"});
+    const d = await r.json();
+    if(!r.ok){ toast(`同步失败: ${d.detail||""}`,"err"); return; }
+    toast(`同步完成: 新增 ${d.added} 个，更新倍率 ${d.updated} 个，共 ${d.total_in_db} 个（${d.enabled} 个启用）`);
+    loadModels();
+  } catch(e){ toast("同步异常: "+e.message,"err"); }
+}
+async function toggleModel(id, enabled){
+  const r = await api("/api/models/"+id,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify({enabled})});
+  toast(r.ok?(enabled?"已启用":"已禁用"):"操作失败", r.ok?"ok":"err");
+  if(r.ok) loadModels();
+}
+async function deleteModelConfig(id){ if(!confirm("确认移除该模型配置？移除后该模型将被过滤。"))return; const r=await api("/api/models/"+id,{method:"DELETE"}); toast(r.ok?"已移除":"失败",r.ok?"ok":"err"); if(r.ok) loadModels(); }
+async function enableAllModels(enabled){
+  const r = await api("/api/models/batch-toggle",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify({enabled,level:"system"})});
+  const d = await r.json().catch(()=>({}));
+  toast(`${enabled?'启用':'禁用'}了 ${d.updated||0} 个模型`, r.ok?"ok":"err");
+  if(r.ok) loadModels();
+}
+
+/* ==================== 线上同步设置 ==================== */
+async function loadSyncConfig(){
+  const r = await api("/api/sync/config"); if(!r.ok) return; const d = await r.json();
+  $("#syncUrl").value = d.remote_url || "";
+  $("#syncStatus").innerHTML = `当前：远程 URL ${d.remote_url ? '<span class="text-emerald-600">已配置</span>' : '<span class="text-slate-400">未配置</span>'} · 密钥 ${d.secret_set ? '已设置（'+esc(d.secret_masked)+'）' : '<span class="text-slate-400">未设置</span>'}`;
+}
+async function saveSyncConfig(){
+  const body = { remote_url: $("#syncUrl").value.trim(), secret: $("#syncSecret").value };
+  const r = await api("/api/sync/config",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)});
+  toast(r.ok?"已保存同步配置":"保存失败", r.ok?"ok":"err");
+  if(r.ok) loadSyncConfig();
+}
+async function pushToOnline(){
+  if(!confirm("确认把本地账号与模型配置推送到配置的线上地址？")) return;
+  toast("正在推送...","ok");
+  try{
+    const r = await api("/api/sync/push",{method:"POST"});
+    const d = await r.json();
+    if(!r.ok){ $("#syncStatus").innerHTML = `<span class="text-red-500">推送失败: ${esc(d.detail||"")}</span>`; toast("推送失败","err"); return; }
+    const rr = d.remote_result || {};
+    const acc = (rr.accounts||{}); const md = (rr.models||{});
+    $("#syncStatus").innerHTML = `<span class="text-emerald-600">推送成功</span> · 账号 +${acc.added||0}/~${acc.updated||0} · 模型 +${md.added||0}/~${md.updated||0}`;
+    toast("已推送到线上");
+  }catch(e){ toast("推送异常: "+e.message,"err"); }
+}
+
+/* ==================== 定时任务 ==================== */
+async function loadSchedules(){
+  const r = await api("/api/schedules"); if(!r.ok) return; const d = await r.json();
+  $("#scheduleBody").innerHTML = (d.items||[]).map(s => `
+    <tr class="border-t">
+      <td class="px-4 py-3">${esc(s.name)}</td>
+      <td class="px-4 py-3 text-slate-500">${esc(s.task_label)}</td>
+      <td class="px-4 py-3">${s.interval_minutes}</td>
+      <td class="px-4 py-3 text-xs text-slate-400 whitespace-nowrap">${s.next_run_at ? s.next_run_at.slice(0,19).replace('T',' ') : '-'}</td>
+      <td class="px-4 py-3 text-xs max-w-[220px] truncate" title="${esc(s.last_result||'')}">${esc(s.last_result||'尚未运行')}</td>
+      <td class="px-4 py-3">${s.enabled?'<span class="px-2 py-0.5 rounded-full text-xs bg-emerald-100 text-emerald-700">启用</span>':'<span class="px-2 py-0.5 rounded-full text-xs bg-slate-100 text-slate-500">禁用</span>'}</td>
+      <td class="px-4 py-3 text-right whitespace-nowrap">
+        <button onclick="runSchedule(${s.id})" class="text-emerald-600 hover:text-emerald-800 mr-1" title="立即运行"><i class="fa-solid fa-play"></i></button>
+        <button onclick="toggleSchedule(${s.id})" class="text-indigo-600 hover:text-indigo-800 mr-1" title="启停"><i class="fa-solid fa-power-off"></i></button>
+        <button onclick="editSchedule(${s.id},'${esc(s.name)}','${s.task}',${s.interval_minutes},${s.enabled})" class="text-slate-500 hover:text-slate-800 mr-1" title="编辑"><i class="fa-solid fa-pen"></i></button>
+        <button onclick="delSchedule(${s.id})" class="text-red-500 hover:text-red-700" title="删除"><i class="fa-solid fa-trash"></i></button>
+      </td>
+    </tr>`).join("") || `<tr><td colspan="7" class="px-4 py-8 text-center text-slate-400">还没有定时任务</td></tr>`;
+}
+async function runSchedule(id){ toast("运行中...","ok"); const r=await api("/api/schedules/"+id+"/run",{method:"POST"}); if(r.ok){ toast("运行完成"); } else { const d=await r.json().catch(()=>({})); toast("运行失败: "+(d.detail||""),"err"); } loadSchedules(); }
+async function toggleSchedule(id){ await api("/api/schedules/"+id+"/toggle",{method:"POST"}); loadSchedules(); }
+async function delSchedule(id){ if(!confirm("确认删除该任务？"))return; const r=await api("/api/schedules/"+id,{method:"DELETE"}); toast(r.ok?"已删除":"失败",r.ok?"ok":"err"); if(r.ok) loadSchedules(); }
+function scheduleForm(title, data){
+  data = data || {};
+  const tasks = [["refresh_balances","刷新平台总积分"],["sync_models","同步模型列表"]];
+  const opts = tasks.map(t=>`<option value="${t[0]}" ${data.task===t[0]?'selected':''}>${t[1]}</option>`).join("");
+  openModal(`
+    <h3 class="font-bold mb-3">${title}</h3>
+    <input id="scName" class="w-full border rounded-lg px-3 py-2 mb-2 text-sm" placeholder="任务名（可选）" value="${esc(data.name||'')}" />
+    <label class="block text-sm mb-1">任务类型</label>
+    <select id="scTask" class="w-full border rounded-lg px-3 py-2 mb-2 text-sm">${opts}</select>
+    <label class="block text-sm mb-1">间隔（分钟）</label>
+    <input id="scIv" type="number" min="1" class="w-full border rounded-lg px-3 py-2 mb-2 text-sm" value="${data.interval_minutes||60}" />
+    <label class="flex items-center gap-2 text-sm mb-2"><input id="scEnabled" type="checkbox" ${data.enabled?'checked':''} /> 启用</label>
+    <div class="flex justify-end gap-2 mt-2">
+      <button onclick="closeModal()" class="px-3 py-1.5 rounded-lg border text-sm">取消</button>
+      <button onclick="submitSchedule(${data.id||0})" class="px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-sm">保存</button>
+    </div>`);
+}
+function openAddSchedule(){ scheduleForm("新建定时任务", {enabled:1, interval_minutes:60, task:"refresh_balances"}); }
+function editSchedule(id,name,task,iv,en){ scheduleForm("编辑定时任务", {id,name,task,interval_minutes:iv,enabled:en}); }
+async function submitSchedule(id){
+  const body = { name:$("#scName").value, task:$("#scTask").value, interval_minutes:Number($("#scIv").value||60), enabled:$("#scEnabled").checked?1:0 };
+  let r;
+  if(id){ r = await api("/api/schedules/"+id,{method:"PATCH",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}); }
+  else { r = await api("/api/schedules",{method:"POST",headers:{"Content-Type":"application/json"},body:JSON.stringify(body)}); }
+  if(r.ok){ closeModal(); loadSchedules(); toast(r.ok?"已保存":"保存失败",r.ok?"ok":"err"); }
+  else { const d=await r.json().catch(()=>({})); toast("保存失败: "+(d.detail||""),"err"); }
+}
+
+/* ==================== 用量日志（服务端分页） ==================== */
+let _logPage = 1, _logPageSize = 20;
+async function loadLogs(page){
+  _logPage = page || 1;
+  const model = ($("#logModel") ? $("#logModel").value : "").trim();
+  const start = ($("#logStart") ? $("#logStart").value : "").trim();
+  const end = ($("#logEnd") ? $("#logEnd").value : "").trim();
+  const q = `page=${_logPage}&page_size=${_logPageSize}`
+    + (model ? `&model=${encodeURIComponent(model)}` : "")
+    + (start ? `&start=${encodeURIComponent(start + " 00:00:00")}` : "")
+    + (end ? `&end=${encodeURIComponent(end + " 23:59:59")}` : "");
+  const r = await api("/api/logs?"+q); if(!r.ok) return; const d = await r.json();
+  const total = d.total, totalPages = Math.max(1, Math.ceil(total/_logPageSize));
+  $("#logBody").innerHTML = (d.items||[]).map(l => `
+    <tr class="border-t">
+      <td class="px-4 py-3 text-xs text-slate-400 whitespace-nowrap">${l.created_at ? l.created_at.slice(0,19).replace('T',' ') : '-'}</td>
+      <td class="px-4 py-3">${esc(l.key_name)}</td>
+      <td class="px-4 py-3">${esc(l.account_name)}</td>
+      <td class="px-4 py-3 font-mono text-xs">${esc(l.model)}</td>
+      <td class="px-4 py-3 ${l.credits>0?'text-amber-600 font-medium':'text-slate-400'}">${l.credits}</td>
+    </tr>`).join("") || `<tr><td colspan="5" class="px-4 py-8 text-center text-slate-400">暂无日志（代理产生调用后这里会记录）</td></tr>`;
+  $("#logPager").innerHTML = pagerHtml(total, _logPage, totalPages, "loadLogs");
+}
+
+// 启动
+if (TOKEN) { api("/api/accounts").then(r => r.ok ? enterApp() : logout()).catch(logout); }
+else { /* 显示登录 */ }
+</script>
+</body>
+</html>

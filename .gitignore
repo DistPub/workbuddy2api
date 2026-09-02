@@ -1,0 +1,54 @@
+# ===== 依赖（不要上传） =====
+.venv/
+venv/
+env/
+node_modules/
+
+# ===== Python 缓存 =====
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+
+# ===== 密钥 / 本地配置（绝不能上传） =====
+.env
+.env.local
+.env.*.local
+
+# ===== 运行日志 / 运行时产物 =====
+*.log
+logs/
+
+
+# ===== 压缩包备份 =====
+*.zip
+*.tar.gz
+*.rar
+
+# ===== IDE / 编辑器 =====
+.idea/
+.vscode/
+*.swp
+
+# ===== 本地工作记忆与工具态（不在仓库内） =====
+.workbuddy/
+
+# ===== 本地部署 / SSH 快捷脚本（含服务器 IP 与密码，禁止提交） =====
+# 这些只是本机往线上推的快捷脚本，保留在本地即可，切勿上传。
+ssh_exec.py
+ssh_run.py
+ssh_sync.py
+sync_auth.py
+sync_auth.bat
+start_admin.bat
+start_converter.bat
+
+# ===== 测试文件（不提交到仓库；本地可保留用于回归测试） =====
+test_anthropic_adapter.py
+test_responses_adapter.py
+scripts/test_daily_checkin.py
+
+# ===== 强制保留（即便以点开头也要提交） =====
+!.gitignore
+!.env.example

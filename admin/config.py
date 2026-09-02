@@ -1,0 +1,82 @@
+"""管理后台配置（FastAPI + MySQL + Redis）。
+
+所有项均从环境变量读取，推荐通过项目根目录的 `.env` 文件提供（不要写死在代码里）。
+复制 `.env.example` 为 `.env` 并填入实际值后使用：
+
+    cp .env.example .env
+    # 然后编辑 .env 填入真实数据库密码 / 后台密码 / JWT 密钥等
+
+本地开发默认值只是占位，生产环境务必在 `.env` 中覆盖敏感项。
+"""
+import os
+import logging
+
+from dotenv import load_dotenv
+
+# 加载项目根目录的 .env（无论运行时 CWD 在哪都能找到）。
+# 不会覆盖已经存在的系统环境变量（便于容器 / systemd 注入）。
+_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+load_dotenv(os.path.join(_ROOT, ".env"))
+
+_logger = logging.getLogger(__name__)
+
+
+class Settings:
+    # 数据库 / 缓存
+    DATABASE_URL = os.getenv(
+        "ADMIN_DATABASE_URL",
+        "mysql+pymysql://root:root@127.0.0.1:3306/workbuddy_admin?charset=utf8mb4",
+    )
+    REDIS_URL = os.getenv("ADMIN_REDIS_URL", "redis://127.0.0.1:6379/0")
+
+    # 后端（CodeBuddy / WorkBuddy）
+    BACKEND = os.getenv("ADMIN_BACKEND", "https://copilot.tencent.com")
+
+    # 本机 WorkBuddy/CodeBuddy 桌面端登录态目录（用于「扫描本机 / 注入切换」）
+    CLIENT_AUTH_DIR = os.getenv(
+        "ADMIN_CLIENT_AUTH_DIR",
+        r"%LOCALAPPDATA%\CodeBuddyExtension\Data\Public\auth",
+    )
+
+    # 管理后台登录
+    ADMIN_USERNAME = os.getenv("ADMIN_USERNAME", "admin")
+    ADMIN_PASSWORD = os.getenv("ADMIN_PASSWORD", "admin123")
+    # 生产环境务必在 .env 中设置 ADMIN_JWT_SECRET 为 >=32 字节的随机串；
+    # 未设置时回退到开发弱密钥并输出告警。
+    _jwt = os.getenv("ADMIN_JWT_SECRET")
+    if not _jwt:
+        _logger.warning("ADMIN_JWT_SECRET 未设置，使用开发弱密钥；生产环境请在 .env 中配置")
+        _jwt = "dev-insecure-jwt-secret-change-me"
+    JWT_SECRET = _jwt
+    JWT_EXPIRE_HOURS = int(os.getenv("ADMIN_JWT_EXPIRE_HOURS", "24"))
+
+    # 服务监听
+    HOST = os.getenv("ADMIN_HOST", "0.0.0.0")
+    PORT = int(os.getenv("ADMIN_PORT", "8790"))
+
+    # 计费：后端未回传 credits 时，按 total_tokens * 系数 / 1000 估算（系数单位为「每千 token 积分」）
+    COST_PER_TOKEN = float(os.getenv("ADMIN_COST_PER_TOKEN", "0.01"))
+
+    # 上游记录客户端 IP 时使用的 header 名（若上游有自定义要求，如 X-Client-Ip / X-Real-IP 等）
+    # 为空则同时发送 X-Forwarded-For / X-Real-IP / X-Client-IP 等常见头
+    UPSTREAM_CLIENT_HEADER = os.getenv("ADMIN_UPSTREAM_CLIENT_HEADER", "")
+
+    # 上游请求用量「client」列显示的产品名。
+    # 腾讯 CodeBuddy/WorkBuddy 后端通过 X-IDE-Name 头识别客户端，默认 "WorkBuddy"。
+    UPSTREAM_CLIENT_NAME = os.getenv("ADMIN_UPSTREAM_CLIENT_NAME", "WorkBuddy")
+
+    # 账号选择策略：remain（剩余最多优先）/ lru（最久未用优先）
+    ACCOUNT_SELECT = os.getenv("ADMIN_ACCOUNT_SELECT", "remain")
+
+    # 登录防爆破：同一 IP 在窗口内失败超过阈值即锁定一段时间
+    LOGIN_MAX_ATTEMPTS = int(os.getenv("ADMIN_LOGIN_MAX_ATTEMPTS", "5"))
+    LOGIN_WINDOW_SECONDS = int(os.getenv("ADMIN_LOGIN_WINDOW_SECONDS", "300"))  # 5 分钟窗口
+    LOGIN_LOCK_SECONDS = int(os.getenv("ADMIN_LOGIN_LOCK_SECONDS", "900"))      # 锁 15 分钟
+
+    # CORS：共享网关用 Authorization 头鉴权（无需 Cookie），故默认关闭 credentials；
+    # 留空或 * 表示允许任意来源；如需限制可设 ADMIN_CORS_ORIGINS=https://a.com,https://b.com
+    _raw_cors = os.getenv("ADMIN_CORS_ORIGINS", "*")
+    CORS_ORIGINS = [o.strip() for o in _raw_cors.split(",") if o.strip()] or ["*"]
+
+
+settings = Settings()
