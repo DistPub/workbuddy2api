@@ -433,8 +433,26 @@ def _log(msg: str):
     except OSError:
         pass  # 日志失败不应影响主流程
 
+_LOG_OK_LOCK = threading.Lock()
+_LOG_BAD_LOCK = threading.Lock()
 
+def _log_ok(msg: str):
+    line = f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {msg}\n"
+    try:
+        with _LOG_OK_LOCK:
+            with open('ok.log', "a", encoding="utf-8") as f:
+                f.write(line)
+    except OSError:
+        pass  # 日志失败不应影响主流程
 
+def _log_bad(msg: str):
+    line = f"[{time.strftime('%Y-%m-%d %H:%M:%S')}] {msg}\n"
+    try:
+        with _LOG_BAD_LOCK:
+            with open('bad.log', "a", encoding="utf-8") as f:
+                f.write(line)
+    except OSError:
+        pass  # 日志失败不应影响主流程
 
 def _truncate(s: str, n: int = 80) -> str:
     s = str(s).replace("\n", " ").strip()
@@ -788,10 +806,14 @@ async def _stream_upstream(url: str, headers: dict, body: dict,
             async with c.stream("POST", url, headers=headers, json=body) as r:
                 if r.status_code != 200:
                     err = await r.aread()
+                    _log_bad(f'url: {url} headers: {json.dumps(headers)} json: {json.dumps(body)}')
+                    _log_bad(f'status: {r.status_code} error: {err.decode('utf-8','replace')}')
                     _log(f"{prefix}✗ HTTP {r.status_code} | {model_name} | {_truncate(err.decode('utf-8','replace'),200)}")
                     _log(f"{prefix}── ERROR BODY ──\n{err.decode('utf-8','replace')}")
                     yield _err_event(err, r.status_code)
                     return
+
+                _log_ok(f'url: {url} headers: {json.dumps(headers)} json: {json.dumps(body)}')
                 async for chunk in r.aiter_bytes():
                     if chunk:
                         raw_parts.append(chunk)
