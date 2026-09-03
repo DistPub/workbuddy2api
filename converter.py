@@ -410,7 +410,12 @@ PASSTHROUGH_BODY_KEYS = {
 
 app = FastAPI(title="codebuddy2openai", version="2.0")
 CONFIG: dict = {"api_key": "", "cred": None, "log_path": None,
-                "desensitize": False, "no_compact": False}  # cred: CredentialManager | None
+                "desensitize": False, "no_compact": False,
+                # 去掉流式 delta 里的空 content:""（GLM 等模型的 reasoning 周期
+                # 会被 AI SDK 当成"文本开始"，提前掐断 Thought 周期，产生上百个
+                # "Thought for 2ms"。默认开，可用环境变量 WORKBUDDY_STRIP_EMPTY_DELTA=0 关闭）
+                "strip_empty_delta": os.environ.get("WORKBUDDY_STRIP_EMPTY_DELTA", "1") not in ("0", "false", "no")}
+                # cred: CredentialManager | None
 
 
 # ---------------------------------------------------------------------------
@@ -759,45 +764,95 @@ async def _stream_upstream(url: str, headers: dict, body: dict,
 
     同时轻量解析流，统计 finish_reason / tool_calls / usage 用于日志，不阻塞转发。
     完整原始 SSE 累积后落盘到日志（调试用）。
+
+    当 CONFIG['strip_empty_delta'] 开启时，对每个完整 SSE event 做 delta 清洗：
+    去掉 `delta.content == ""` / `delta.reasoning_content == ""` 这类"空字段"，
+    避免 AI SDK 把空 content 当成"文本已开始"而提前结束 reasoning 周期。
     """
     finish_reason = None
     tool_names: list[str] = []
     usage: dict = {}
     saw_filter = False
-    buf = b""
-    raw_parts: list[bytes] = []   # 累积完整原始 SSE
+    line_buf = _SseLineBuffer()
+    raw_parts: list[bytes] = []     # 累积完整原始 SSE
+    forwarded_parts: list[bytes] = []  # 累积转发给客户端的 SSE（已清洗）
     prefix = f"[{rid}] " if rid else ""
+    strip = bool(CONFIG.get("strip_empty_delta"))
 
-    def _feed(chunk: bytes):
-        nonlocal finish_reason, saw_filter, buf
-        # 行缓冲解析：把累计的 chunk 按 data: 行切出来统计
-        buf += chunk
-        while b"\n" in buf:
-            line, buf = buf.split(b"\n", 1)
-            line = line.strip()
-            if not line.startswith(b"data:"):
+    def _process_event_lines(lines: list[bytes]) -> bytes | None:
+        """处理一个完整 SSE event（以 \\n\\n 结尾的若干行）。
+        返回要转发给客户端的字节；返回 None 表示该 event 应被丢弃。
+        """
+        if not lines:
+            return None
+        new_lines: list[bytes] = []
+        for ln in lines:
+            stripped = ln.lstrip()
+            if strip and stripped.startswith(b"data:"):
+                payload = stripped[5:].lstrip()
+                try:
+                    obj = json.loads(payload)
+                except (json.JSONDecodeError, ValueError):
+                    new_lines.append(ln)
+                    continue
+                _, new_obj = _sanitize_delta_obj(obj)
+                if obj is not new_obj:
+                    new_lines.append(b"data: " + json.dumps(
+                        new_obj, ensure_ascii=False, separators=(",", ":")
+                    ).encode("utf-8"))
+                else:
+                    new_lines.append(ln)
                 continue
-            data = line[5:].strip()
-            if data == b"[DONE]":
+            new_lines.append(ln)
+        if not new_lines:
+            return None
+        return b"\n".join(new_lines) + b"\n\n"
+
+    def _make_sink() -> tuple[list[bytes], callable]:
+        """返回 (out_lines, feed_line)。feed_line(line) 累积事件行，
+        遇到空行/满行时把完整事件推入 out_lines。
+        """
+        out: list[bytes] = []
+        evt: list[bytes] = []
+
+        def feed_line(ln: bytes):
+            if ln == b"":
+                if evt:
+                    out.append(_process_event_lines(evt))
+                    evt.clear()
+            else:
+                evt.append(ln)
+
+        return out, feed_line
+
+    def _record_stats(events: list[bytes | None]):
+        nonlocal finish_reason, saw_filter
+        for cleaned in events:
+            if not cleaned:
                 continue
-            try:
-                obj = json.loads(data)
-            except Exception:
-                continue
-            if obj.get("usage"):
-                usage.update(obj["usage"])
-            for ch in obj.get("choices") or []:
-                if ch.get("finish_reason"):
-                    finish_reason = ch["finish_reason"]
-                for tc in (ch.get("delta") or {}).get("tool_calls") or []:
-                    nm = (tc.get("function") or {}).get("name")
-                    if nm:
-                        tool_names.append(nm)
+            text_repr = cleaned.decode("utf-8", "replace")
+            # 统计用：从清洗后的 event 里解析（finish / tool_calls / usage）
+            for el in cleaned.split(b"\n"):
+                s = el.lstrip()
+                if not s.startswith(b"data:"):
+                    continue
+                d = s[5:].lstrip()
+                if d == b"[DONE]":
+                    continue
+                try:
+                    o = json.loads(d)
+                except Exception:
+                    continue
+                if o.get("usage"):
+                    usage.update(o["usage"])
+                for ch in o.get("choices") or []:
+                    if ch.get("finish_reason"):
+                        finish_reason = ch["finish_reason"]
+                    for tc in (ch.get("delta") or {}).get("tool_calls") or []:
+                        nm = (tc.get("function") or {}).get("name")
+                        if nm:
+                            tool_names.append(nm)
             # 内容审核拦截常以 content-filter 或特殊中文文案返回
-            try:
-                text_repr = data.decode("utf-8", "replace")
-            except Exception:
-                text_repr = ""
             if "content-filter" in text_repr or "敏感" in text_repr or "审核" in text_repr:
                 saw_filter = True
 
@@ -807,7 +862,7 @@ async def _stream_upstream(url: str, headers: dict, body: dict,
                 if r.status_code != 200:
                     err = await r.aread()
                     _log_bad(f'url: {url} headers: {json.dumps(headers)} json: {json.dumps(body)}')
-                    _log_bad(f'status: {r.status_code} error: {err.decode('utf-8','replace')}')
+                    _log_bad(f"status: {r.status_code} error: {err.decode('utf-8','replace')}")
                     _log(f"{prefix}✗ HTTP {r.status_code} | {model_name} | {_truncate(err.decode('utf-8','replace'),200)}")
                     _log(f"{prefix}── ERROR BODY ──\n{err.decode('utf-8','replace')}")
                     yield _err_event(err, r.status_code)
@@ -815,10 +870,42 @@ async def _stream_upstream(url: str, headers: dict, body: dict,
 
                 _log_ok(f'url: {url} headers: {json.dumps(headers)} json: {json.dumps(body)}')
                 async for chunk in r.aiter_bytes():
-                    if chunk:
-                        raw_parts.append(chunk)
-                        _feed(chunk)
-                        yield chunk
+                    if not chunk:
+                        continue
+                    raw_parts.append(chunk)
+                    lines = line_buf.feed(chunk)
+                    out, feed_line = _make_sink()
+                    for ln in lines:
+                        feed_line(ln)
+                    if out:
+                        _record_stats(out)
+                        for evt in out:
+                            if evt is not None:
+                                forwarded_parts.append(evt)
+                                yield evt
+        # flush
+        tail_lines = line_buf.flush()
+        if tail_lines:
+            out, feed_line = _make_sink()
+            for ln in tail_lines:
+                feed_line(ln)
+            if out:
+                _record_stats(out)
+                for evt in out:
+                    if evt is not None:
+                        forwarded_parts.append(evt)
+                        yield evt
+        # 流提前结束（无结尾空行），把残留当一个 event 处理
+        out, feed_line = _make_sink()
+        for ln in line_buf.flush():
+            feed_line(ln)
+        if out:
+            _record_stats(out)
+            for evt in out:
+                if evt is not None:
+                    forwarded_parts.append(evt)
+                    yield evt
+        # 处理 event_buf 残余（feed_line 内部已处理，无需单独操作）
     except httpx.HTTPError as e:
         _log(f"{prefix}✗ 网络错误 | {model_name} | {e}")
         yield _err_event(str(e).encode(), 502)
@@ -831,6 +918,8 @@ async def _stream_upstream(url: str, headers: dict, body: dict,
          + f" | tokens={usage.get('total_tokens', '?')}")
     # 完整原始 SSE（后端返回的全部内容）
     _log(f"{prefix}── RESPONSE RAW SSE ──\n{b''.join(raw_parts).decode('utf-8','replace')}")
+    if strip:
+        _log(f"{prefix}── RESPONSE FORWARDED SSE (sanitized) ──\n{b''.join(forwarded_parts).decode('utf-8','replace')}")
 
 
 def _safe_err(r: httpx.Response) -> dict:
@@ -858,6 +947,172 @@ def _looks_like_content_filter_text(text: str) -> bool:
         or "内容审核" in text
         or "无法响应您的请求" in text
     )
+
+
+# ---------------------------------------------------------------------------
+# 流式 delta 净化：去掉空 content / 空 reasoning_content 段
+# ---------------------------------------------------------------------------
+# GLM 等模型的 SSE 经常出现 `{"delta":{"content":"","reasoning_content":"..."}}`。
+# AI SDK（Codex CLI / Claude Agent SDK / Vercel AI SDK）只要看到 delta 里出现
+# `content` 字段就认为"文本输出已开始"，会立刻结束当前 reasoning 周期；下一
+# 个只有 reasoning_content 的 delta 又开启新周期，导致一次回答里出现几百个
+# "Thought for 2ms" 块，每块 1 个 token。这里在网关层把"空的 content"和"空
+# 的 reasoning_content"都剥掉，让 AI SDK 把它当成纯 reasoning delta。
+# ---------------------------------------------------------------------------
+
+# 单个 SSE data 行的 content/reasoning_content 是否空且无其他可见字段
+_EMPTY_DELTA_KEYS = ("content", "reasoning_content")
+
+
+def _is_empty_delta_content(value: str) -> bool:
+    return value is None or (isinstance(value, str) and value == "")
+
+
+def _sanitize_delta_obj(obj: Any) -> tuple[bool, Any]:
+    """尝试清洗 SSE data JSON；返回 (changed, new_obj)。
+
+    - 若不是 Chat delta 形状（choices/delta 都在），原样返回 (False, obj)
+    - 清洗规则：遍历每个 choice.delta
+        * 若 content == "" 且 reasoning_content 非空 → 删 content
+        * 若 content == "" 且 reasoning_content 也空 → 整个 delta 若仍含
+          tool_calls/role 等"非空"字段就保留，但若 delta 完全空（只两个空字段）→ 整 choice 删
+        * reasoning_content == "" 同样处理
+    """
+    if not isinstance(obj, dict):
+        return False, obj
+    choices = obj.get("choices")
+    if not isinstance(choices, list) or not choices:
+        return False, obj
+    changed = False
+    new_choices: list = []
+    for ch in choices:
+        if not isinstance(ch, dict):
+            new_choices.append(ch)
+            continue
+        delta = ch.get("delta")
+        if not isinstance(delta, dict):
+            new_choices.append(ch)
+            continue
+
+        # 复制 delta 用于清洗
+        new_delta = dict(delta)
+        delta_changed = False
+
+        for k in _EMPTY_DELTA_KEYS:
+            v = new_delta.get(k)
+            if _is_empty_delta_content(v):
+                # 仅当存在"非空兄弟字段"时删除这个空字段；
+                # 若 delta 里只有这一个空字段，则把整个 choice 也丢掉
+                if len(new_delta) == 1:
+                    delta = None  # 标记整 choice 删除
+                    delta_changed = True
+                    break
+                del new_delta[k]
+                delta_changed = True
+
+        if delta is None:
+            # 整个 choice 没有任何有效 delta 字段
+            # 但若 choice 仍带 finish_reason（典型收尾 chunk），就保留 finish_reason
+            if ch.get("finish_reason"):
+                new_choices.append({"index": ch.get("index", 0),
+                                    "delta": {},
+                                    "finish_reason": ch["finish_reason"]})
+                changed = True
+            else:
+                # 整 choice 丢弃
+                changed = True
+                continue
+        elif delta_changed:
+            new_ch = dict(ch)
+            new_ch["delta"] = new_delta
+            new_choices.append(new_ch)
+            changed = True
+        else:
+            new_choices.append(ch)
+
+    if not changed:
+        return False, obj
+    new_obj = dict(obj)
+    new_obj["choices"] = new_choices
+    return True, new_obj
+
+
+def _sanitize_sse_data(data: str) -> str:
+    """清洗单个 SSE data 行（去掉 'data:' 前缀后的 payload）。
+    非 JSON / 非 Chat delta 形状 → 原样返回。
+    """
+    if data == "[DONE]":
+        return data
+    try:
+        obj = json.loads(data)
+    except (json.JSONDecodeError, ValueError):
+        return data
+    changed, new_obj = _sanitize_delta_obj(obj)
+    if not changed:
+        return data
+    # ensure_ascii=False 保留中文，separators 紧凑减少字节
+    return json.dumps(new_obj, ensure_ascii=False, separators=(",", ":"))
+
+
+def _maybe_sanitize_line(line: str) -> str:
+    """对单条 SSE 行做"按行"清洗：保留 event:/id:/retry: 等控制行；
+    data: 行解析 payload 并清洗后重新拼回 data: 前缀。
+    关闭时（CONFIG['strip_empty_delta'] = False）原样返回。
+    """
+    if not CONFIG.get("strip_empty_delta"):
+        return line
+    if not line or not line.startswith("data:"):
+        return line
+    payload = line[5:].lstrip()
+    if not payload or payload == "[DONE]":
+        return line
+    try:
+        obj = json.loads(payload)
+    except (json.JSONDecodeError, ValueError):
+        return line
+    _, new_obj = _sanitize_delta_obj(obj)
+    if obj is new_obj:
+        return line
+    return "data: " + json.dumps(new_obj, ensure_ascii=False, separators=(",", ":"))
+
+
+class _SseLineBuffer:
+    """字节级 SSE 行缓冲解析器。
+
+    上游可能把一行 SSE 拆到多个 TCP chunk 里发（GLM 流经常出现），所以不能
+    假设每次 aiter_bytes 拿到的是完整行。每调一次 feed(chunk) 就把内部
+    缓冲里能切的完整行（以 \n 分隔）切出来，返回行列表（不含换行符）。
+    """
+
+    __slots__ = ("_buf",)
+
+    def __init__(self) -> None:
+        self._buf = bytearray()
+
+    def feed(self, chunk: bytes) -> list[bytes]:
+        if not chunk:
+            return []
+        self._buf.extend(chunk)
+        out: list[bytes] = []
+        while True:
+            idx = self._buf.find(b"\n")
+            if idx < 0:
+                break
+            line = bytes(self._buf[:idx])
+            del self._buf[:idx + 1]
+            if line.endswith(b"\r"):
+                line = line[:-1]
+            out.append(line)
+        return out
+
+    def flush(self) -> list[bytes]:
+        if not self._buf:
+            return []
+        line = bytes(self._buf)
+        self._buf.clear()
+        if line.endswith(b"\r"):
+            line = line[:-1]
+        return [line]
 
 
 def _chat_body_desensitize(body: dict, *, force_compact: bool = False) -> dict:
@@ -972,6 +1227,7 @@ async def create_response(request: Request,
             raise HTTPException(status_code=status_code, detail=_safe_err_raw(raw, status_code))
         converter = ResponsesStreamConverter(model=model_name)
         for line in raw.decode("utf-8", "replace").splitlines():
+            line = _maybe_sanitize_line(line)
             converter.feed_line(line)
         chat_body = final_body
     except HTTPException:
@@ -1004,6 +1260,7 @@ async def _stream_responses(url: str, headers: dict, body: dict,
         for line in raw.decode("utf-8", "replace").splitlines():
             if line.strip():
                 raw_sse_lines.append(line)
+            line = _maybe_sanitize_line(line)
             events = converter.feed_line(line)
             if events:
                 yield events.encode("utf-8")
@@ -1101,6 +1358,7 @@ async def _stream_anthropic(url: str, headers: dict, body: dict,
                     yield f"event: error\ndata: {json.dumps(error_evt, ensure_ascii=False)}\n\n".encode("utf-8")
                     return
                 async for line in r.aiter_lines():
+                    line = _maybe_sanitize_line(line)
                     events = converter.feed_line(line)
                     if events:
                         yield events.encode("utf-8")
