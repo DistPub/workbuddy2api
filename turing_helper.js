@@ -16,8 +16,7 @@
 "use strict";
 const path = require("path");
 
-const sdkDir = process.env.WORKBUDDY_TURING_SDK_DIR
-  || "D:\\workbuddy\\resources\\app.asar.unpacked\\native\\turing-sdk";
+const sdkDir = process.env.WORKBUDDY_TURING_SDK_DIR || "./turing-sdk";
 
 let turing;
 try {
@@ -60,7 +59,7 @@ function isSupported() {
     }
     process.stdout.write(JSON.stringify({ token: t }));
   } catch (e) {
-    process.stderr.write("fetch device token failed: " + (e && e.message ? e.message : String(e)) + "\n");
+    process.stderr.write(`sdk dir: ${sdkDir} fetch device token failed: ` + (e && e.message ? e.message : String(e)) + "\n");
     process.exit(1);
   }
 })();

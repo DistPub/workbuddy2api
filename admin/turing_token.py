@@ -49,15 +49,10 @@ def get_device_token(force: bool = False) -> str | None:
     if not node or not _HELPER.is_file():
         raise Exception(f'not found node or helper')
 
-    env = dict(os.environ)
-    # 允许通过环境变量覆盖 SDK 目录 / channelId，未设置则用 helper 内的默认值
-    if not env.get("WORKBUDDY_TURING_SDK_DIR"):
-        env.setdefault("WORKBUDDY_TURING_SDK_DIR",
-                       r"D:\workbuddy\resources\app.asar.unpacked\native\turing-sdk")
 
     out = subprocess.run(
         [node, str(_HELPER)],
-        capture_output=True, text=True, timeout=25, env=env,
+        capture_output=True, text=True, timeout=25, env=dict(os.environ),
     )
 
     if out.returncode != 0:
