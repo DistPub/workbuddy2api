@@ -1421,7 +1421,7 @@ def preflight() -> bool:
 
 def main():
     ap = argparse.ArgumentParser(description="CodeBuddy -> OpenAI 兼容转换器（直连后端）")
-    ap.add_argument("--host", default="127.0.0.1")
+    ap.add_argument("--host", default="0.0.0.0")
     ap.add_argument("--port", type=int, default=8787)
     ap.add_argument("--api-key", default=os.environ.get("CODEBUDDY2OPENAI_KEY", ""),
                     help="可选：要求客户端携带的 API key（默认不校验）")

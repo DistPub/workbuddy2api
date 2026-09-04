@@ -1,5 +1,7 @@
 # workbuddy2api
 
+`uv run python converter.py --port 8787 --log cb.log --desensitize --no-compact`
+
 把 **WorkBuddy / CodeBuddy（腾讯代码助手）** 的桌面端登录态，转成你本机 / 局域网可直接使用的 **OpenAI / Anthropic 兼容 API**，并提供一个 **多账号代理共享平台**（账号池自动切换、独立 API Key、按 Key 配额、用量记账）。
 
 `workbuddy2api` 不负责登录、不模拟桌面端、不替你执行工具。它只做三件事：
