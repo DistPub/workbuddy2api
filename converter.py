@@ -601,7 +601,7 @@ async def chat_completions(request: Request,
     # 可选：脱敏。缓解客户端合规模板（如 Codex CLI / ZCode 注入的说明文字）被后端误判为敏感词。
     # 处理 system / developer 消息、Codex 注入的上下文 user 消息，以及 tools 的 description。
     if CONFIG.get("desensitize"):
-        body = desensitize_body(body, roles=("system", "developer", "tool", "assistant", "user"),
+        body = desensitize_body(body, roles=("system", "assistant"),
                                 desensitize_harness_user=True,
                                 desensitize_tools=True,
                                 compact_harness=not CONFIG.get("no_compact"),

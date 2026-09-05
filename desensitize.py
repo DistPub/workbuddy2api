@@ -129,6 +129,9 @@ SENSITIVE_TERMS: list[str] = [
     "Kimi",
     "Qwen",
     "Cursor",
+    "OpenCode",
+    "agent-identity",
+    "OhMyOpenCode"
 ]
 
 # 编译成一个大正则，按词长降序，避免短词先吃掉长词。
