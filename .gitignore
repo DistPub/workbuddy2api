@@ -20,6 +20,7 @@ __pycache__/
 # ===== 运行日志 / 运行时产物 =====
 *.log
 logs/
+.turing_token_cache.json
 
 
 # ===== 压缩包备份 =====
