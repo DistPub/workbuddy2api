@@ -15,8 +15,12 @@
  */
 "use strict";
 const path = require("path");
+let DEFAULT_TURING_SDK = './turing-sdk';
+if (process.platform === 'darwin') {
+  DEFAULT_TURING_SDK = './macos-turing-sdk';
+}
 
-const sdkDir = process.env.WORKBUDDY_TURING_SDK_DIR || "./turing-sdk";
+const sdkDir = process.env.WORKBUDDY_TURING_SDK_DIR || DEFAULT_TURING_SDK;
 
 let turing;
 try {
